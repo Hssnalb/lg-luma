@@ -5704,5 +5704,23 @@
     "cs": "{time} left",
     "ca": "{time} left",
     "hu": "{time} left"
+  },
+  "resumeUpNext": {
+    "zh-tw": "UP NEXT",
+    "en": "UP NEXT",
+    "de": "UP NEXT",
+    "es": "UP NEXT",
+    "zh": "UP NEXT",
+    "pt": "UP NEXT",
+    "it": "UP NEXT",
+    "ru": "UP NEXT",
+    "pl": "UP NEXT",
+    "fr": "ÉPISODE SUIVANT",
+    "vi": "UP NEXT",
+    "nl": "UP NEXT",
+    "sv": "UP NEXT",
+    "cs": "UP NEXT",
+    "ca": "UP NEXT",
+    "hu": "UP NEXT"
   }
 }

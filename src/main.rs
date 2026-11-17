@@ -763,6 +763,7 @@ fn run() -> Result<(), String> {
         options.preferences.is_none() && options.test_extra_apps == 0,
     );
     let webhook_service = webhook::Service::new();
+    state.resume.items = resume::load_cache(&preferences_path);
     let resume_service = resume::Service::new(
         &preferences_path,
         (options.script.is_empty() && options.frames.is_none())

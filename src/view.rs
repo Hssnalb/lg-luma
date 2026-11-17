@@ -1267,7 +1267,11 @@ fn continue_watching(out: &mut Scene, state: &State, assets: &Assets, now: Offse
         }
     };
     out.text(
-        language.t("resumeLabel"),
+        language.t(if item.up_next() {
+            "resumeUpNext"
+        } else {
+            "resumeLabel"
+        }),
         Rect::new(x, logo_bottom - title_height - 36., 600., 24.),
         text(19.2, 650, 0.16),
         accent,
@@ -1293,7 +1297,7 @@ fn continue_watching(out: &mut Scene, state: &State, assets: &Assets, now: Offse
             false,
         );
     }
-    if item.duration_ms > 0 {
+    if item.duration_ms > 0 && !item.up_next() {
         let bar = Rect::new(x, progress_y + 13., 240., 5.);
         out.shape(bar, 2.5, c(0xffffff, 0.28));
         out.shape(
@@ -1380,7 +1384,7 @@ fn continue_watching(out: &mut Scene, state: &State, assets: &Assets, now: Offse
         } else {
             out.shape(thumb, thumb.h / 2., c(0xffffff, 0.08));
         }
-        if item.duration_ms > 0 {
+        if item.duration_ms > 0 && !item.up_next() {
             let track = Rect::new(thumb.x + 18., thumb.y + thumb.h - 11., thumb.w - 36., 4.);
             out.shape(track, 2., c(0xffffff, 0.45));
             let fill = c(item.accent.unwrap_or(0x7cc4ef), 1.);

@@ -27,7 +27,7 @@ const BACKDROP_DELAY: f32 = 0.3;
 const BACKDROP_FADE: f32 = 0.5;
 const LOGO: (u32, u32) = (1040, 176);
 
-#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Item {
     pub name: String,
     pub season: Option<u32>,
@@ -58,6 +58,10 @@ impl Item {
         } else {
             (self.offset_ms as f32 / self.duration_ms as f32).clamp(0., 1.)
         }
+    }
+    /// Stremio moves a finished episode's entry on to the next one with an offset of ~1 ms.
+    pub fn up_next(&self) -> bool {
+        self.offset_ms < 1_000
     }
     pub fn remaining_minutes(&self) -> u64 {
         self.duration_ms
@@ -240,17 +244,24 @@ fn load(
     auth_key: &mut Option<String>,
 ) -> Result<Vec<Item>, String> {
     if auth_key.is_none() {
-        let config: Value = serde_json::from_slice(&fs::read(config).map_err(|e| e.to_string())?)
+        let settings: Value = serde_json::from_slice(&fs::read(config).map_err(|e| e.to_string())?)
             .map_err(|e| format!("stremio.json: {e}"))?;
-        *auth_key = match config["authKey"].as_str() {
+        *auth_key = match settings["authKey"].as_str() {
             Some(key) => Some(key.to_owned()),
-            None => api(
-                agent,
-                "login",
-                json!({"type": "Login", "email": config["email"], "password": config["password"], "facebook": false}),
-            )?["authKey"]
-                .as_str()
-                .map(str::to_owned),
+            None => {
+                let key = api(
+                    agent,
+                    "login",
+                    json!({"type": "Login", "email": settings["email"], "password": settings["password"], "facebook": false}),
+                )?["authKey"]
+                    .as_str()
+                    .map(str::to_owned);
+                // Keep the session key, never the password, once a login has worked.
+                if let Some(key) = &key {
+                    write_private(config, &json!({ "authKey": key }).to_string());
+                }
+                key
+            }
         };
     }
     let key = auth_key
@@ -279,11 +290,48 @@ fn load(
             .cmp(&a["state"]["lastWatched"].as_str())
     });
     fs::create_dir_all(cache).map_err(|e| e.to_string())?;
-    Ok(watching
+    let items: Vec<Item> = watching
         .into_iter()
         .take(MAX_ITEMS)
         .map(|item| resolve(agent, cache, item))
-        .collect())
+        .collect();
+    if let Ok(json) = serde_json::to_string(&items) {
+        write_private(&cache.join("items.json"), &json);
+    }
+    Ok(items)
+}
+
+/// Atomic owner-only write; failures only cost the next start a login or the cached row.
+fn write_private(path: &Path, contents: &str) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let partial = path.with_extension("part");
+    if fs::write(&partial, contents).is_ok() {
+        let _ = fs::set_permissions(&partial, fs::Permissions::from_mode(0o600));
+        let _ = fs::rename(&partial, path);
+    }
+}
+
+/// The row from the last successful refresh, shown at once while the next one runs.
+pub fn load_cache(preferences: &Path) -> Vec<Item> {
+    let directory = preferences.parent().unwrap_or(Path::new("."));
+    if !directory.join("stremio.json").is_file() {
+        return Vec::new();
+    }
+    fs::read(directory.join("resume/items.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Vec<Item>>(&bytes).ok())
+        .unwrap_or_default()
+        .into_iter()
+        // Images can be cleared with the cache folder; never point the renderer at a missing file.
+        .map(|mut item| {
+            for path in [&mut item.logo, &mut item.thumb, &mut item.backdrop] {
+                if path.as_ref().is_some_and(|p| !Path::new(p).is_file()) {
+                    *path = None;
+                }
+            }
+            item
+        })
+        .collect()
 }
 
 fn resolve(agent: &ureq::Agent, cache: &Path, item: &Value) -> Item {
@@ -489,5 +537,24 @@ mod tests {
         assert_eq!(duration(119), "1 h 59 min");
         assert_eq!(duration(120), "2 h");
         assert_eq!(encode("tt4574334:1:6"), "tt4574334%3A1%3A6");
+        assert!(!item.up_next());
+
+        // The cached row survives a restart; images that vanished are dropped, not drawn.
+        let dir = std::env::temp_dir().join(format!("luma-resume-{}", std::process::id()));
+        fs::create_dir_all(dir.join("resume")).unwrap();
+        let preferences = dir.join("preferences.json");
+        assert!(load_cache(&preferences).is_empty());
+        fs::write(dir.join("stremio.json"), "{}").unwrap();
+        let mut cached = item.clone();
+        cached.thumb = Some(dir.join("missing.jpg").to_string_lossy().into_owned());
+        write_private(
+            &dir.join("resume/items.json"),
+            &serde_json::to_string(&[cached]).unwrap(),
+        );
+        let loaded = load_cache(&preferences);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].thumb, None);
+        assert_eq!(loaded[0].offset_ms, item.offset_ms);
+        let _ = fs::remove_dir_all(dir);
     }
 }
