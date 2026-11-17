@@ -2595,12 +2595,9 @@ impl State {
             Target::Resume(_) if !self.launching => {
                 // ponytail: opens Stremio on its home; resuming the exact episode needs a
                 // deep link the webOS Stremio app accepts.
-                if let Some(app) = self
-                    .inventory
-                    .apps
-                    .iter()
-                    .find(|app| app.id.to_lowercase().contains("stremio"))
-                {
+                if let Some(app) = self.inventory.apps.iter().find(|app| {
+                    app.id == "io.strem.tv" || app.id.to_lowercase().contains("stremio")
+                }) {
                     return vec![Effect::Launch(app.id.clone())];
                 }
             }
