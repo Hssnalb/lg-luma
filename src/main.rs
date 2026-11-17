@@ -23,6 +23,7 @@ mod platform;
 mod raster;
 mod recents;
 mod renderer;
+mod resume;
 #[path = "scroll-preview.rs"]
 mod scroll_preview;
 mod sdl_events;
@@ -755,6 +756,11 @@ fn run() -> Result<(), String> {
         options.preferences.is_none() && options.test_extra_apps == 0,
     );
     let webhook_service = webhook::Service::new();
+    let resume_service = resume::Service::new(
+        &preferences_path,
+        (options.script.is_empty() && options.frames.is_none())
+            || std::env::var_os("LUMA_RESUME_FIXTURE").is_some(),
+    );
     let update_service = update::Service::new(public_update_checks);
     effects(
         vec![Effect::Refresh],
@@ -1306,6 +1312,11 @@ fn run() -> Result<(), String> {
             visible,
             OffsetDateTime::now_utc().unix_timestamp(),
         );
+        state.dirty |= state.resume.tick(
+            &resume_service,
+            visible && state.page == state::Page::Home,
+            OffsetDateTime::now_utc().unix_timestamp(),
+        );
         if std::mem::take(&mut state.update_check_requested) {
             if let Some(version) = &options.test_update_version {
                 state.update_response(Ok(
@@ -1827,6 +1838,11 @@ fn run() -> Result<(), String> {
             &state.preferences,
             state.page,
             visible,
+            OffsetDateTime::now_utc().unix_timestamp(),
+        );
+        state.dirty |= state.resume.tick(
+            &resume_service,
+            visible && state.page == state::Page::Home,
             OffsetDateTime::now_utc().unix_timestamp(),
         );
         // SDL-webOS disables text input when its own panel is dismissed, even

@@ -3431,3 +3431,32 @@ fn hovering_corner_controls_keeps_their_geometry_and_does_not_change_pages() {
     state.hover = None;
     assert_eq!(tab(&state), idle);
 }
+
+#[test]
+fn continue_watching_row_sits_between_dock_and_header() {
+    let mut state = ready();
+    let item = crate::resume::Item {
+        name: "Show".into(),
+        season: Some(1),
+        episode: Some(2),
+        episode_title: None,
+        offset_ms: 60_000,
+        duration_ms: 600_000,
+        logo: None,
+        logo_size: (0, 0),
+        thumb: None,
+        accent: None,
+    };
+    state.resume.items = vec![item.clone(), item];
+    let first = state.first_content();
+    state.focus = first.clone();
+    state.direction(crate::state::Direction::Up, &controls(&state));
+    assert_eq!(state.focus, Target::Resume(0));
+    state.direction(crate::state::Direction::Right, &controls(&state));
+    assert_eq!(state.focus, Target::Resume(1));
+    assert_eq!(state.resume.selected, 1);
+    state.direction(crate::state::Direction::Down, &controls(&state));
+    assert_eq!(state.focus, first);
+    state.direction(crate::state::Direction::Up, &controls(&state));
+    assert_eq!(state.focus, Target::Resume(1));
+}

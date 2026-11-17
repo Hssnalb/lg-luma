@@ -1185,7 +1185,255 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
         // The Home peek is decorative, including while the drawer settles closed.
         out.controls.truncate(controls);
     }
+    let start = out.draw.len();
+    let controls = out.controls.len();
+    continue_watching(out, state, assets, now);
+    out.fade(start, 1. - state.drawer_progress(), 1.);
+    if state.drawer_visibility > 0. {
+        out.controls.truncate(controls);
+    }
     favorites_dock(out, state, assets);
+}
+
+const RESUME_CARD_HEIGHT: f32 = 100.;
+
+/// Stremio "Continue watching": the selected title above a row of glass pills, just above the
+/// favourites dock. Hidden when Stremio is not configured or nothing is in progress.
+fn continue_watching(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
+    let items = &state.resume.items;
+    if items.is_empty() {
+        return;
+    }
+    let language = state.preferences.language;
+    let selected = match state.focus {
+        Target::Resume(index) => index,
+        _ => state.resume.selected,
+    }
+    .min(items.len() - 1);
+    let item = &items[selected];
+    let accent = c(item.accent.unwrap_or(0x7cc4ef), 1.);
+    let cards_y = state.dock_y() - 24. - 24. - RESUME_CARD_HEIGHT;
+    let x = 84.;
+    let soft = c(0xffffff, 0.72);
+
+    // The title: logo when there is one, left-aligned within 560×100.
+    let progress_y = cards_y - 100.;
+    let episode_y = progress_y - 46.;
+    let has_episode = item.season.is_some();
+    let logo_bottom = if has_episode {
+        episode_y - 14.
+    } else {
+        progress_y - 18.
+    };
+    let title_height = match (&item.logo, item.logo_size) {
+        (Some(path), (w, h)) if w > 0 && h > 0 => {
+            let scale = (560. / w as f32).min(100. / h as f32);
+            let (w, h) = (w as f32 * scale, h as f32 * scale);
+            out.image(path.clone(), Rect::new(x, logo_bottom - h, w, h), 0., false);
+            h
+        }
+        _ => {
+            let (name, style) = assets.fit_line(&item.name, text(72., 650, -0.03), 1000., 40.);
+            let height = style.size * style.line_height;
+            out.text(
+                name,
+                Rect::new(x, logo_bottom - height, 1000., height),
+                style,
+                WHITE,
+                false,
+            );
+            height
+        }
+    };
+    out.text(
+        language.t("resumeLabel"),
+        Rect::new(x, logo_bottom - title_height - 36., 600., 24.),
+        text(19.2, 650, 0.16),
+        accent,
+        false,
+    );
+    if let (Some(season), Some(episode)) = (item.season, item.episode) {
+        let mut line = language.format(
+            "resumeEpisode",
+            &[
+                ("season", &season.to_string()),
+                ("episode", &episode.to_string()),
+            ],
+        );
+        if let Some(title) = &item.episode_title {
+            line = format!("{line} · {title}");
+        }
+        let (line, style) = assets.fit_line(&line, text(28.8, 400, -0.01), 1000., 20.);
+        out.text(
+            line,
+            Rect::new(x, episode_y, 1000., 36.),
+            style,
+            c(0xffffff, 0.86),
+            false,
+        );
+    }
+    if item.duration_ms > 0 {
+        let bar = Rect::new(x, progress_y + 13., 240., 5.);
+        out.shape(bar, 2.5, c(0xffffff, 0.28));
+        out.shape(
+            Rect::new(bar.x, bar.y, bar.w * item.progress(), bar.h),
+            2.5,
+            accent,
+        );
+        let minutes = item.remaining_minutes();
+        let end = now + time::Duration::minutes(minutes as i64);
+        let line = language.format(
+            "resumeLeft",
+            &[
+                ("time", &crate::resume::duration(minutes)),
+                (
+                    "clock",
+                    &language.clock(end, state.preferences.hour_24, false),
+                ),
+            ],
+        );
+        out.text(
+            line,
+            Rect::new(x + 260., progress_y, 900., 32.),
+            text(24., 400, 0.),
+            soft,
+            false,
+        );
+    }
+
+    // Row header: title, position and the time left across every card.
+    let heading = language.t("resumeRow");
+    let heading_style = text(25.6, 600, -0.01);
+    out.text(
+        heading,
+        Rect::new(x, cards_y - 50., 600., 32.),
+        heading_style,
+        WHITE,
+        false,
+    );
+    let total: u64 = items
+        .iter()
+        .map(crate::resume::Item::remaining_minutes)
+        .sum();
+    let evening = matches!(now.hour(), 17..=23 | 0..=4);
+    let mut detail = language.format(
+        "resumeCount",
+        &[
+            ("index", &(selected + 1).to_string()),
+            ("total", &items.len().to_string()),
+        ],
+    );
+    if total > 0 {
+        detail = format!(
+            "{detail}  ·  {}",
+            language.format(
+                if evening {
+                    "resumeTonight"
+                } else {
+                    "resumeToday"
+                },
+                &[("time", &crate::resume::duration(total))],
+            )
+        );
+    }
+    out.text(
+        detail,
+        Rect::new(
+            x + assets.width(heading, heading_style) + 18.,
+            cards_y - 44.,
+            1200.,
+            26.,
+        ),
+        text(19.2, 400, 0.02),
+        c(0xffffff, 0.6),
+        false,
+    );
+
+    // Cards run to the screen edge like the favourites row.
+    out.draw.push(Draw::Clip(Some(state.favorites_viewport())));
+    let left = if state.resume.scroll > 0. {
+        [HOME_FADE_LEFT, HOME_STRIP_LEFT]
+    } else {
+        [0., 0.]
+    };
+    out.draw.push(Draw::EdgeFadeX(Some([
+        left[0],
+        left[1],
+        HOME_STRIP_RIGHT,
+        HOME_FADE_RIGHT,
+    ])));
+    let (title_style, sub_style) = (text(25.6, 600, -0.01), text(19.2, 400, 0.01));
+    let mut card_x = x - state.resume.scroll;
+    for (index, item) in items.iter().enumerate() {
+        let subtitle = match (item.season, item.episode) {
+            (Some(season), Some(episode)) => {
+                let short = format!("S{season} E{episode}");
+                match &item.episode_title {
+                    Some(title) => format!("{short} · {title}"),
+                    None => short,
+                }
+            }
+            _ => language.format(
+                "resumeMinutesLeft",
+                &[("time", &crate::resume::duration(item.remaining_minutes()))],
+            ),
+        };
+        let text_width = assets
+            .width(&item.name, title_style)
+            .max(assets.width(&subtitle, sub_style))
+            .min(440.);
+        let thumb = Rect::new(card_x + 12., cards_y + 12., 134., RESUME_CARD_HEIGHT - 24.);
+        let card = Rect::new(
+            card_x,
+            cards_y,
+            thumb.w + 24. + 20. + text_width + 32.,
+            RESUME_CARD_HEIGHT,
+        );
+        let focused = state.focus == Target::Resume(index);
+        out.pill(card, focused, false);
+        if let Some(path) = &item.thumb {
+            out.image(path.clone(), thumb, thumb.h / 2., false);
+        } else {
+            out.shape(thumb, thumb.h / 2., c(0xffffff, 0.08));
+        }
+        if item.duration_ms > 0 {
+            let track = Rect::new(thumb.x + 18., thumb.y + thumb.h - 11., thumb.w - 36., 4.);
+            out.shape(track, 2., c(0xffffff, 0.45));
+            let fill = c(item.accent.unwrap_or(0x7cc4ef), 1.);
+            out.shape(
+                Rect::new(track.x, track.y, track.w * item.progress(), 4.),
+                2.,
+                fill,
+            );
+        }
+        let ink = if focused { c(0x242424, 1.) } else { WHITE };
+        let text_x = thumb.x + thumb.w + 20.;
+        let (name, style) = assets.fit_line(&item.name, title_style, text_width, 18.);
+        out.text(
+            name,
+            Rect::new(text_x, card.y + 20., text_width, 32.),
+            style,
+            ink,
+            false,
+        );
+        let (subtitle, style) = assets.fit_line(&subtitle, sub_style, text_width, 14.);
+        let sub_ink = if focused {
+            c(0x242424, 0.62)
+        } else {
+            c(0xffffff, 0.66)
+        };
+        out.text(
+            subtitle,
+            Rect::new(text_x, card.y + 57., text_width, 26.),
+            style,
+            sub_ink,
+            false,
+        );
+        out.control(Target::Resume(index), card, false);
+        card_x += card.w + 22.;
+    }
+    out.draw.push(Draw::EdgeFadeX(None));
+    out.draw.push(Draw::Clip(Some(state.content_viewport())));
 }
 
 fn home_grid_cell_rect(position: WidgetPosition) -> Rect {

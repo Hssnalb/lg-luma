@@ -70,6 +70,8 @@ pub enum Target {
     RecentRetry,
     App(String),
     DockApp(String),
+    /// A Continue watching card on Home.
+    Resume(usize),
     Input(String),
     Filter(usize),
     Search,
@@ -239,6 +241,7 @@ pub struct State {
     pub active_weather: HomeWidget,
     pub extra_weather: Vec<weather::Weather>,
     pub markets: crate::markets::Markets,
+    pub resume: crate::resume::Resume,
     pub page: Page,
     pub focus: Target,
     pub inventory: Inventory,
@@ -343,6 +346,7 @@ impl State {
             panel_started: None,
             weather: weather::Weather::default(),
             markets: crate::markets::Markets::default(),
+            resume: crate::resume::Resume::default(),
             active_weather: HomeWidget::Weather,
             widget_position_cell: 0,
             extra_weather: (0..HOME_GRID_CELLS)
@@ -781,7 +785,7 @@ impl State {
                 }
                 let viewport = if (self.page == Page::Home
                     && matches!(control.target, Target::App(_)))
-                    || matches!(control.target, Target::DockApp(_))
+                    || matches!(control.target, Target::DockApp(_) | Target::Resume(_))
                 {
                     self.favorites_viewport()
                 } else if matches!(control.target, Target::Background(_)) {
@@ -1034,6 +1038,14 @@ impl State {
         let previous = self.scroll;
         let previous_home = self.home_scroll;
         if let Some(control) = controls.iter().find(|c| c.target == self.focus) {
+            if matches!(self.focus, Target::Resume(_)) {
+                if control.rect.x < HOME_STRIP_LEFT {
+                    self.resume.scroll += control.rect.x - HOME_STRIP_LEFT;
+                } else if control.rect.x + control.rect.w > HOME_STRIP_RIGHT {
+                    self.resume.scroll += control.rect.x + control.rect.w - HOME_STRIP_RIGHT;
+                }
+                self.resume.scroll = self.resume.scroll.max(0.);
+            }
             if (self.page == Page::Home && matches!(self.focus, Target::App(_)))
                 || matches!(self.focus, Target::DockApp(_))
             {
@@ -1623,6 +1635,9 @@ impl State {
                             let id = apps[next].id.clone();
                             self.focus(Target::App(id), controls);
                         }
+                        Direction::Up if !self.resume.items.is_empty() => {
+                            self.focus(Target::Resume(self.resume.selected), controls)
+                        }
                         Direction::Up => self.focus(
                             if index < 3 {
                                 self.first_input_target()
@@ -1638,6 +1653,22 @@ impl State {
                     }
                     return vec![];
                 }
+            }
+            if self.page == Page::Home
+                && let Target::Resume(index) = self.focus
+            {
+                let last = self.resume.items.len().saturating_sub(1);
+                let target = match direction {
+                    Direction::Left => Target::Resume(index.saturating_sub(1)),
+                    Direction::Right => Target::Resume((index + 1).min(last)),
+                    Direction::Up => self.first_input_target(),
+                    Direction::Down => self.first_content(),
+                };
+                if let Target::Resume(index) = target {
+                    self.resume.selected = index;
+                }
+                self.focus(target, controls);
+                return vec![];
             }
             let setting_rows: Option<&[Target]> = match self.subpage {
                 Some(Subpage::Market(kind)) if kind.kind() == HomeWidget::Crypto => {
@@ -2560,6 +2591,18 @@ impl State {
                     self.back();
                 }
                 return vec![Effect::Launch("com.palm.app.settings".into())];
+            }
+            Target::Resume(_) if !self.launching => {
+                // ponytail: opens Stremio on its home; resuming the exact episode needs a
+                // deep link the webOS Stremio app accepts.
+                if let Some(app) = self
+                    .inventory
+                    .apps
+                    .iter()
+                    .find(|app| app.id.to_lowercase().contains("stremio"))
+                {
+                    return vec![Effect::Launch(app.id.clone())];
+                }
             }
             Target::App(_) if self.managing_apps() && !self.launching => self.options(),
             Target::App(id) | Target::DockApp(id) | Target::Input(id) if !self.launching => {
