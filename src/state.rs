@@ -217,6 +217,11 @@ pub enum Effect {
     /// Refresh apps: read the inventory and every app icon again.
     Reload,
     Launch(String),
+    /// Restart the Stremio app on a Stremio Web route (see `resume::Item::route`).
+    Resume {
+        app: String,
+        route: String,
+    },
     Uninstall(String),
     DeleteWallpaper(String),
     Recent {
@@ -2592,13 +2597,20 @@ impl State {
                 }
                 return vec![Effect::Launch("com.palm.app.settings".into())];
             }
-            Target::Resume(_) if !self.launching => {
-                // ponytail: opens Stremio on its home; resuming the exact episode needs a
-                // deep link the webOS Stremio app accepts.
+            Target::Resume(index) if !self.launching => {
+                let route = self
+                    .resume
+                    .items
+                    .get(index)
+                    .map(|item| item.route.clone())
+                    .unwrap_or_default();
                 if let Some(app) = self.inventory.apps.iter().find(|app| {
                     app.id == "io.strem.tv" || app.id.to_lowercase().contains("stremio")
                 }) {
-                    return vec![Effect::Launch(app.id.clone())];
+                    return vec![Effect::Resume {
+                        app: app.id.clone(),
+                        route,
+                    }];
                 }
             }
             Target::App(_) if self.managing_apps() && !self.launching => self.options(),

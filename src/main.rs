@@ -352,6 +352,13 @@ fn effects(
                     }
                 }
             }
+            Effect::Resume { app, route } => {
+                if !state.launching && platform.webos {
+                    state.launching = true;
+                    state.notify(state.preferences.language.t("opening"));
+                    platform.send(Request::Resume { app, route });
+                }
+            }
             Effect::FireWebhook(tile) => webhook.send(tile),
             Effect::UpdateDownload(release) => updates.request(update::Request::Download(release)),
             Effect::Quit => return false,

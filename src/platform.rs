@@ -176,6 +176,10 @@ pub enum Request {
     Refresh,
     RefreshInputs,
     Launch(String),
+    Resume {
+        app: String,
+        route: String,
+    },
     Uninstall(String),
     SyncSplash(String),
     Recent {
@@ -345,6 +349,22 @@ impl Platform {
                             Ok(())
                         };
                         Response::Launched { id, result }
+                    }
+                    Request::Resume { app, route } => {
+                        // The Stremio launcher page reads its params only on a cold start, so
+                        // close a running copy first (the same call Recent apps uses).
+                        let result = if webos && valid_app_id(&app) {
+                            let _ = recent_call(&crate::recents::Command::Close(app.clone()));
+                            std::thread::sleep(std::time::Duration::from_millis(1200));
+                            call(
+                                "luna://com.webos.applicationManager/launch",
+                                json!({"id": app, "params": {"stremio": route}}),
+                            )
+                            .map(|_| ())
+                        } else {
+                            Err("Invalid application identifier".into())
+                        };
+                        Response::Launched { id: app, result }
                     }
                     Request::SyncSplash(background) => {
                         if webos

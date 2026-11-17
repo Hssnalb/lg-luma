@@ -38,6 +38,9 @@ pub struct Item {
     /// The most vivid tone of the artwork, for the label and progress bars.
     #[serde(default)]
     pub accent: Option<u32>,
+    /// Stremio Web route of the episode or film, e.g. `#/detail/series/tt1/tt1%3A1%3A6`.
+    #[serde(default)]
+    pub route: String,
 }
 
 impl Item {
@@ -291,7 +294,24 @@ fn resolve(agent: &ureq::Agent, cache: &Path, item: &Value) -> Item {
         logo: logo.map(|(path, _)| path),
         thumb: thumb.map(|(path, _)| path),
         accent,
+        route: format!(
+            "#/detail/{}/{}/{}",
+            encode(kind),
+            encode(id),
+            encode(if video_id.is_empty() { id } else { video_id })
+        ),
     }
+}
+
+/// `encodeURIComponent` for ids: anything but ASCII alphanumerics and `-_.` is escaped.
+fn encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// Saturation-weighted mean, lifted to a readable brightness on dark glass.
@@ -381,11 +401,13 @@ mod tests {
             logo_size: (0, 0),
             thumb: None,
             accent: None,
+            route: String::new(),
         };
         assert_eq!(item.remaining_minutes(), 10);
         assert!((item.progress() - 0.769).abs() < 0.01);
         assert_eq!(duration(9), "9 min");
         assert_eq!(duration(119), "1 h 59 min");
         assert_eq!(duration(120), "2 h");
+        assert_eq!(encode("tt4574334:1:6"), "tt4574334%3A1%3A6");
     }
 }
