@@ -79,6 +79,7 @@ pub struct Resume {
     pub selected: usize,
     pending: bool,
     next: i64,
+    visible: bool,
     /// Backdrop crossfade: what is shown, what it fades from, and what focus asks for.
     shown: Option<String>,
     from: Option<String>,
@@ -126,6 +127,11 @@ impl Resume {
 
     pub fn tick(&mut self, service: &Service, home_visible: bool, now: i64) -> bool {
         let mut changed = false;
+        // Coming back to Home (from Stremio, after an episode) refreshes at once.
+        if home_visible && !self.visible {
+            self.next = 0;
+        }
+        self.visible = home_visible;
         if home_visible
             && !self.pending
             && now >= self.next
