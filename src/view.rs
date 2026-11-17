@@ -1267,11 +1267,7 @@ fn continue_watching(out: &mut Scene, state: &State, assets: &Assets, now: Offse
         }
     };
     out.text(
-        language.t(if item.up_next() {
-            "resumeUpNext"
-        } else {
-            "resumeLabel"
-        }),
+        language.t("resumeLabel"),
         Rect::new(x, logo_bottom - title_height - 36., 600., 24.),
         text(19.2, 650, 0.16),
         accent,
