@@ -20,6 +20,11 @@ const CINEMETA: &str = "https://v3-cinemeta.strem.io/meta";
 const REFRESH: i64 = 5 * 60;
 const MAX_ITEMS: usize = 10;
 pub const THUMB: (u32, u32) = (300, 172);
+const BACKDROP: (u32, u32) = (1280, 720);
+/// Focus must rest on a card this long before its backdrop fades in, so scrolling past
+/// cards neither decodes every image nor flickers.
+const BACKDROP_DELAY: f32 = 0.3;
+const BACKDROP_FADE: f32 = 0.5;
 const LOGO: (u32, u32) = (1040, 176);
 
 #[derive(Clone, Debug, PartialEq, serde::Deserialize)]
@@ -35,6 +40,9 @@ pub struct Item {
     #[serde(default)]
     pub logo_size: (u32, u32),
     pub thumb: Option<String>,
+    /// Full-screen background, pre-darkened for the white text over it.
+    #[serde(default)]
+    pub backdrop: Option<String>,
     /// The most vivid tone of the artwork, for the label and progress bars.
     #[serde(default)]
     pub accent: Option<u32>,
@@ -67,9 +75,51 @@ pub struct Resume {
     pub selected: usize,
     pending: bool,
     next: i64,
+    /// Backdrop crossfade: what is shown, what it fades from, and what focus asks for.
+    shown: Option<String>,
+    from: Option<String>,
+    since: Option<std::time::Instant>,
+    wanted: Option<String>,
+    wanted_since: Option<std::time::Instant>,
 }
 
 impl Resume {
+    /// Follow the focused card's backdrop. Returns whether a frame is still needed.
+    pub fn update_backdrop(&mut self, desired: Option<String>, reduced_motion: bool) -> bool {
+        let now = std::time::Instant::now();
+        if desired != self.wanted {
+            self.wanted = desired;
+            self.wanted_since = Some(now);
+        }
+        let rested = self
+            .wanted_since
+            .is_none_or(|t| t.elapsed().as_secs_f32() >= BACKDROP_DELAY);
+        if self.wanted != self.shown && rested {
+            self.from = self.shown.take();
+            self.shown = self.wanted.clone();
+            self.since = (!reduced_motion).then_some(now);
+        }
+        self.wanted != self.shown || self.fade() < 1.
+    }
+
+    fn fade(&self) -> f32 {
+        self.since
+            .map_or(1., |t| (t.elapsed().as_secs_f32() / BACKDROP_FADE).min(1.))
+    }
+
+    /// `(base, overlay, alpha)` over the wallpaper; `None` paths mean the wallpaper itself.
+    /// `None` overall when only the wallpaper is visible.
+    pub fn backdrop_layers(&self) -> Option<(Option<&str>, Option<&str>, f32)> {
+        let t = self.fade();
+        if t >= 1. {
+            return self.shown.as_deref().map(|path| (Some(path), None, 0.));
+        }
+        if self.shown.is_none() && self.from.is_none() {
+            return None;
+        }
+        Some((self.from.as_deref(), self.shown.as_deref(), t))
+    }
+
     pub fn tick(&mut self, service: &Service, home_visible: bool, now: i64) -> bool {
         let mut changed = false;
         if home_visible
@@ -281,6 +331,8 @@ fn resolve(agent: &ureq::Agent, cache: &Path, item: &Value) -> Item {
         )
     });
     let accent = thumb.as_ref().and_then(|(_, image)| accent(image));
+    let backdrop = background
+        .and_then(|url| backdrop(agent, url, &cache.join(format!("{safe}-backdrop.jpg"))));
     Item {
         name: item["name"].as_str().unwrap_or(id).to_owned(),
         season,
@@ -293,6 +345,7 @@ fn resolve(agent: &ureq::Agent, cache: &Path, item: &Value) -> Item {
             .map_or((0, 0), |(_, image)| image.dimensions()),
         logo: logo.map(|(path, _)| path),
         thumb: thumb.map(|(path, _)| path),
+        backdrop,
         accent,
         route: format!(
             "#/detail/{}/{}/{}",
@@ -312,6 +365,32 @@ fn encode(value: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect()
+}
+
+/// The series background at 720p with the scrim baked in: dimmer overall, darker on the left
+/// and at the bottom where Home's text sits. Done once here, so drawing it costs nothing extra.
+fn backdrop(agent: &ureq::Agent, url: &str, path: &Path) -> Option<String> {
+    if path.is_file() {
+        return Some(path.to_string_lossy().into_owned());
+    }
+    let (_, image) = image(agent, url, &path.with_extension("src.jpg"), BACKDROP, true)?;
+    let mut image = image.into_rgb8();
+    let (w, h) = (image.width() as f32, image.height() as f32);
+    for (x, y, pixel) in image.enumerate_pixels_mut() {
+        let left = (1. - x as f32 / (w * 0.6)).max(0.);
+        let bottom = ((y as f32 / h - 0.5) / 0.5).max(0.);
+        let shade = 0.62 * (1. - 0.45 * left) * (1. - 0.5 * bottom);
+        for channel in &mut pixel.0 {
+            *channel = (f32::from(*channel) * shade) as u8;
+        }
+    }
+    let partial = path.with_extension("part");
+    image
+        .save_with_format(&partial, image::ImageFormat::Jpeg)
+        .ok()?;
+    fs::rename(&partial, path).ok()?;
+    let _ = fs::remove_file(path.with_extension("src.jpg"));
+    Some(path.to_string_lossy().into_owned())
 }
 
 /// Saturation-weighted mean, lifted to a readable brightness on dark glass.
@@ -402,6 +481,7 @@ mod tests {
             thumb: None,
             accent: None,
             route: String::new(),
+            backdrop: None,
         };
         assert_eq!(item.remaining_minutes(), 10);
         assert!((item.progress() - 0.769).abs() < 0.01);

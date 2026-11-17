@@ -541,6 +541,27 @@ pub fn scene(state: &State, assets: &Assets, now: OffsetDateTime) -> Scene {
             false,
         );
     }
+    if let Some((base, overlay, alpha)) = state.resume.backdrop_layers() {
+        let wallpaper = assets.background(state, &state.preferences.background);
+        let full = Rect::new(0., 0., 1920., 1080.);
+        // Replace the wallpaper draw rather than stacking on it once settled.
+        out.draw.clear();
+        out.image(
+            base.map_or(wallpaper.clone(), str::to_owned),
+            full,
+            0.,
+            false,
+        );
+        if alpha > 0. {
+            out.draw.push(Draw::TintedImage(
+                overlay.map_or(wallpaper, str::to_owned),
+                full,
+                0.,
+                false,
+                [1., 1., 1., alpha],
+            ));
+        }
+    }
     let content_start = out.draw.len();
     if recents_replaces_page(state) {
         out.shape(
@@ -1309,43 +1330,6 @@ fn continue_watching(out: &mut Scene, state: &State, assets: &Assets, now: Offse
         Rect::new(x, cards_y - 50., 600., 32.),
         heading_style,
         WHITE,
-        false,
-    );
-    let total: u64 = items
-        .iter()
-        .map(crate::resume::Item::remaining_minutes)
-        .sum();
-    let evening = matches!(now.hour(), 17..=23 | 0..=4);
-    let mut detail = language.format(
-        "resumeCount",
-        &[
-            ("index", &(selected + 1).to_string()),
-            ("total", &items.len().to_string()),
-        ],
-    );
-    if total > 0 {
-        detail = format!(
-            "{detail}  ·  {}",
-            language.format(
-                if evening {
-                    "resumeTonight"
-                } else {
-                    "resumeToday"
-                },
-                &[("time", &crate::resume::duration(total))],
-            )
-        );
-    }
-    out.text(
-        detail,
-        Rect::new(
-            x + assets.width(heading, heading_style) + 18.,
-            cards_y - 44.,
-            1200.,
-            26.,
-        ),
-        text(19.2, 400, 0.02),
-        c(0xffffff, 0.6),
         false,
     );
 
