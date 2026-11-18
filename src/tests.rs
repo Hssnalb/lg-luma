@@ -3447,7 +3447,6 @@ fn continue_watching_row_sits_between_dock_and_header() {
         thumb: None,
         accent: None,
         route: String::new(),
-        backdrop: None,
     };
     state.resume.items = vec![item.clone(), item];
     let first = state.first_content();

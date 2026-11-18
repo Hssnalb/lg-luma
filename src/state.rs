@@ -461,25 +461,6 @@ impl State {
             };
             self.dirty = true;
         }
-        let backdrop = match self.focus {
-            Target::Resume(index)
-                if self.page == Page::Home
-                    && self.overlay.is_none()
-                    && self.drawer_visibility == 0. =>
-            {
-                self.resume
-                    .items
-                    .get(index)
-                    .and_then(|item| item.backdrop.clone())
-            }
-            _ => None,
-        };
-        if self
-            .resume
-            .update_backdrop(backdrop, self.preferences.reduced_motion)
-        {
-            self.dirty = true;
-        }
         let recents_open = self.recents_open();
         if recents_open || self.recents.visibility > 0. {
             self.dirty |= self.recents.animate(
@@ -587,10 +568,6 @@ impl State {
                 && (self.recents.visibility != if self.recents_open() { 1. } else { 0. }
                     || self.recents.cards_animating(self.pointer)))
             || self.previous_background.is_some()
-            || self
-                .resume
-                .backdrop_layers()
-                .is_some_and(|(_, _, t)| t > 0.)
             || self.panel_started.is_some()
             || (!self.preferences.reduced_motion
                 && self

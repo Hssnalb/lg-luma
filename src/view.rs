@@ -541,27 +541,6 @@ pub fn scene(state: &State, assets: &Assets, now: OffsetDateTime) -> Scene {
             false,
         );
     }
-    if let Some((base, overlay, alpha)) = state.resume.backdrop_layers() {
-        let wallpaper = assets.background(state, &state.preferences.background);
-        let full = Rect::new(0., 0., 1920., 1080.);
-        // Replace the wallpaper draw rather than stacking on it once settled.
-        out.draw.clear();
-        out.image(
-            base.map_or(wallpaper.clone(), str::to_owned),
-            full,
-            0.,
-            false,
-        );
-        if alpha > 0. {
-            out.draw.push(Draw::TintedImage(
-                overlay.map_or(wallpaper, str::to_owned),
-                full,
-                0.,
-                false,
-                [1., 1., 1., alpha],
-            ));
-        }
-    }
     let content_start = out.draw.len();
     if recents_replaces_page(state) {
         out.shape(
